@@ -1,13 +1,19 @@
 {
-  "name": "vpn-oregon-render",
-  "version": "1.0.0",
-  "description": "VPN Server for Render Oregon",
+  "name": "vpn-server-render",
+  "version": "2.0.0",
+  "description": "VPN Server for Render with proper PORT handling",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "client": "node client.js"
+    "client": "node client.js",
+    "dev": "nodemon server.js"
   },
-  "keywords": ["vpn", "render", "oregon"],
+  "keywords": [
+    "vpn",
+    "render",
+    "oregon",
+    "server"
+  ],
   "author": "",
   "license": "MIT",
   "engines": {
