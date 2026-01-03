@@ -1,370 +1,277 @@
 // server.js
 const net = require('net');
-const dgram = require('dgram');
 const crypto = require('crypto');
 const http = require('http');
 
-// Конфигурация сервера
+// Конфигурация
 const CONFIG = {
-  PORT: process.env.PORT || 3000,
   VPN_PORT: process.env.VPN_PORT || 1194,
   ADMIN_PORT: process.env.ADMIN_PORT || 3001,
-  VPN_PROTOCOL: process.env.VPN_PROTOCOL || 'tcp',
-  REGION: 'Oregon (US West)',
-  LOG_LEVEL: process.env.LOG_LEVEL || 'info'
+  REGION: 'Oregon (US West)'
 };
 
-// Генерация постоянного ключа (для демонстрации)
-const SECRET_KEY = process.env.VPN_SECRET || 'demo-secret-key-for-vpn-oregon-123';
-const SERVER_KEY = crypto.createHash('sha256').update(SECRET_KEY + '-server').digest();
-const CLIENT_KEY = crypto.createHash('sha256').update(SECRET_KEY + '-client').digest();
-
-// Хранилище клиентов
-const clients = new Map();
+// Генерация ключа
+const SECRET_KEY = process.env.VPN_SECRET || 'vpn-oregon-secret-key-2024';
+const SHARED_KEY = crypto.createHash('sha256').update(SECRET_KEY).digest();
 
 // Логирование
 const logger = {
-  error: (msg, ...args) => console.error(`[ERROR] ${new Date().toISOString()} ${msg}`, ...args),
-  warn: (msg, ...args) => console.warn(`[WARN] ${new Date().toISOString()} ${msg}`, ...args),
-  info: (msg, ...args) => CONFIG.LOG_LEVEL !== 'error' && console.log(`[INFO] ${new Date().toISOString()} ${msg}`, ...args),
-  debug: (msg, ...args) => CONFIG.LOG_LEVEL === 'debug' && console.log(`[DEBUG] ${new Date().toISOString()} ${msg}`, ...args)
+  log: (msg) => console.log(`[${new Date().toISOString()}] ${msg}`),
+  error: (msg) => console.error(`[${new Date().toISOString()}] ERROR: ${msg}`)
 };
 
-// Простое шифрование/дешифрование
-class SimpleEncryption {
-  static encrypt(data, key) {
-    const iv = crypto.randomBytes(12); // 12 байт для GCM
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    
-    const encrypted = Buffer.concat([
-      cipher.update(data),
-      cipher.final()
-    ]);
-    
-    const authTag = cipher.getAuthTag();
-    
-    // Формат: [iv (12 bytes)][authTag (16 bytes)][encrypted data]
-    return Buffer.concat([iv, authTag, encrypted]);
+// Простой шифратор
+class SimpleCipher {
+  static encrypt(data) {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', SHARED_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+    return Buffer.concat([iv, encrypted]);
   }
 
-  static decrypt(encryptedData, key) {
+  static decrypt(data) {
     try {
-      // Проверяем минимальный размер
-      if (encryptedData.length < 28) { // 12 + 16 = 28 байт минимум
-        throw new Error('Data too short');
-      }
-
-      const iv = encryptedData.slice(0, 12);
-      const authTag = encryptedData.slice(12, 28);
-      const data = encryptedData.slice(28);
-      
-      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-      decipher.setAuthTag(authTag);
-      
-      return Buffer.concat([
-        decipher.update(data),
-        decipher.final()
-      ]);
-    } catch (error) {
-      logger.debug(`Decryption error: ${error.message}, data length: ${encryptedData?.length || 0}`);
-      throw new Error('Decryption failed: ' + error.message);
+      const iv = data.slice(0, 16);
+      const encrypted = data.slice(16);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', SHARED_KEY, iv);
+      return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    } catch {
+      return null;
     }
   }
 }
 
-// Простой протокол handshake
-const HANDSHAKE_MAGIC = Buffer.from('VPN_HANDSHAKE_1.0');
-const HANDSHAKE_RESPONSE = Buffer.from('VPN_WELCOME_1.0');
-
-// VPN сервер TCP
-class VPNServerTCP {
+// VPN сервер
+class VPNServer {
   constructor() {
+    this.clients = new Map();
     this.server = net.createServer(this.handleConnection.bind(this));
-    this.clientStates = new Map();
   }
 
   start() {
     this.server.listen(CONFIG.VPN_PORT, '0.0.0.0', () => {
-      logger.info(`VPN TCP сервер запущен на порту ${CONFIG.VPN_PORT} (${CONFIG.REGION})`);
-      logger.info(`Server key (first 8 bytes): ${SERVER_KEY.slice(0, 8).toString('hex')}`);
+      logger.log(`✅ VPN сервер запущен на порту ${CONFIG.VPN_PORT} (${CONFIG.REGION})`);
+      logger.log(`🔑 Ключ шифрования: ${SHARED_KEY.slice(0, 8).toString('hex')}...`);
     });
 
     this.server.on('error', (err) => {
-      logger.error('Ошибка VPN сервера:', err.message);
+      logger.error(`Серверная ошибка: ${err.message}`);
     });
   }
 
   handleConnection(socket) {
     const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
-    logger.info(`Новое подключение от ${clientId}`);
     
-    // Состояние клиента
-    const clientState = {
-      handshakeComplete: false,
-      buffer: Buffer.alloc(0)
-    };
-    this.clientStates.set(clientId, clientState);
+    logger.log(`🔌 Новое подключение: ${clientId}`);
     
-    // Устанавливаем таймаут для handshake
-    const handshakeTimeout = setTimeout(() => {
-      if (!clientState.handshakeComplete) {
-        logger.warn(`Handshake timeout для ${clientId}`);
-        socket.destroy();
-      }
-    }, 10000);
+    // Отправляем приветственное сообщение
+    const welcomeMsg = Buffer.from(`Welcome to Oregon VPN Server\nRegion: ${CONFIG.REGION}\n`);
+    const encryptedWelcome = SimpleCipher.encrypt(welcomeMsg);
+    socket.write(encryptedWelcome);
 
-    socket.on('data', async (data) => {
-      try {
-        clientState.buffer = Buffer.concat([clientState.buffer, data]);
-        
-        // Если handshake еще не завершен, обрабатываем его
-        if (!clientState.handshakeComplete) {
-          await this.handleHandshake(clientId, socket, clientState);
-        } else {
-          // Обрабатываем обычные данные
-          await this.handleClientData(clientId, socket, clientState.buffer);
-          clientState.buffer = Buffer.alloc(0); // Очищаем буфер после обработки
-        }
-      } catch (error) {
-        logger.warn(`Ошибка обработки данных от ${clientId}: ${error.message}`);
-        socket.destroy();
-      }
+    // Настройка обработчиков
+    socket.on('data', (data) => {
+      this.handleData(socket, clientId, data);
     });
 
     socket.on('error', (err) => {
-      logger.warn(`Ошибка сокета ${clientId}: ${err.message}`);
+      logger.log(`⚠️ Ошибка клиента ${clientId}: ${err.message}`);
     });
 
     socket.on('close', () => {
-      clearTimeout(handshakeTimeout);
-      this.clientStates.delete(clientId);
-      logger.info(`Отключение: ${clientId}`);
+      logger.log(`🔌 Отключение: ${clientId}`);
+      this.clients.delete(clientId);
+    });
+
+    socket.on('end', () => {
+      logger.log(`🔌 Клиент ${clientId} завершил соединение`);
+    });
+
+    // Сохраняем клиента
+    this.clients.set(clientId, {
+      socket: socket,
+      connectedAt: new Date(),
+      bytesReceived: 0,
+      bytesSent: 0
     });
   }
 
-  async handleHandshake(clientId, socket, clientState) {
-    // Ждем достаточное количество данных для handshake
-    if (clientState.buffer.length < HANDSHAKE_MAGIC.length) {
-      return; // Ждем еще данных
+  handleData(socket, clientId, data) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    client.bytesReceived += data.length;
+
+    // Дешифруем данные
+    const decrypted = SimpleCipher.decrypt(data);
+    
+    if (!decrypted) {
+      logger.error(`❌ Ошибка дешифрования от ${clientId}`);
+      return;
     }
 
-    try {
-      // Проверяем magic bytes
-      const receivedMagic = clientState.buffer.slice(0, HANDSHAKE_MAGIC.length);
-      
-      if (!receivedMagic.equals(HANDSHAKE_MAGIC)) {
-        logger.warn(`Invalid handshake magic от ${clientId}`);
-        socket.destroy();
-        return;
-      }
+    // Логируем полученное сообщение
+    const message = decrypted.toString().trim();
+    logger.log(`📨 От ${clientId}: "${message}" (${data.length} байт)`);
 
-      logger.info(`Handshake от ${clientId} успешен`);
-      
-      // Отправляем ответный handshake
-      const encryptedResponse = SimpleEncryption.rypt(HANDSHAKE_RESPONSE, SERVER_KEY);
-      socket.write(encryptedResponse);
-      
-      clientState.handshakeComplete = true;
-      
-      // Удаляем handshake данные из буфера
-      clientState.buffer = clientState.buffer.slice(HANDSHAKE_MAGIC.length);
-      
-      logger.info(`Handshake завершен для ${clientId}`);
-    } catch (error) {
-      logger.error(`Handshake ошибка для ${clientId}: ${error.message}`);
-      socket.destroy();
+    // Формируем ответ
+    const response = Buffer.from(`✅ Получено: "${message}"\n🕒 Время сервера: ${new Date().toISOString()}\n`);
+    const encryptedResponse = SimpleCipher.encrypt(response);
+    
+    socket.write(encryptedResponse);
+    client.bytesSent += encryptedResponse.length;
+
+    // Если клиент отправил "exit", закрываем соединение
+    if (message.toLowerCase() === 'exit') {
+      logger.log(`👋 Закрытие соединения по запросу от ${clientId}`);
+      socket.end();
     }
   }
 
-  async handleClientData(clientId, socket, data) {
-    try {
-      // Дешифруем данные от клиента
-      const decrypted = SimpleEncryption.decrypt(data, CLIENT_KEY);
-      
-      logger.debug(`Данные от ${clientId}: ${decrypted.length} байт`);
-      
-      // Простая обработка: эхо-ответ
-      const response = Buffer.from(`Echo: ${decrypted.toString()}`);
-      const encryptedResponse = SimpleEncryption.encrypt(response, SERVER_KEY);
-      
-      socket.write(encryptedResponse);
-      
-      // Обновляем статистику
-      this.updateStats(clientId, decrypted.length);
-    } catch (error) {
-      logger.warn(`Ошибка обработки данных от ${clientId}: ${error.message}`);
-      throw error;
-    }
-  }
-
-  updateStats(clientId, bytes) {
-    // Здесь можно обновлять статистику по клиентам
+  getStats() {
+    return {
+      region: CONFIG.REGION,
+      activeClients: this.clients.size,
+      totalClients: Array.from(this.clients.values()).map(c => ({
+        connectedAt: c.connectedAt,
+        bytesReceived: c.bytesReceived,
+        bytesSent: c.bytesSent
+      })),
+      serverTime: new Date().toISOString(),
+      uptime: process.uptime()
+    };
   }
 }
 
-// Web сервер для health checks
+// HTTP сервер для мониторинга
 class AdminServer {
-  constructor() {
-    this.stats = {
-      totalConnections: 0,
-      activeConnections: 0,
-      bytesTransferred: 0,
-      startTime: new Date()
-    };
+  constructor(vpnServer) {
+    this.vpnServer = vpnServer;
+    this.server = http.createServer(this.handleRequest.bind(this));
   }
 
   start() {
-    const server = http.createServer((req, res) => {
-      // CORS headers
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET');
-      res.setHeader('Content-Type', 'application/json');
-
-      if (req.url === '/health') {
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          status: 'healthy',
-          region: CONFIG.REGION,
-          protocol: CONFIG.VPN_PROTOCOL,
-          uptime: process.uptime(),
-          timestamp: new Date().toISOString()
-        }));
-      } else if (req.url === '/stats') {
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          region: CONFIG.REGION,
-          protocol: CONFIG.VPN_PROTOCOL,
-          vpn_port: CONFIG.VPN_PORT,
-          server_time: new Date().toISOString(),
-          uptime: Math.floor(process.uptime()),
-          memory: process.memoryUsage()
-        }));
-      } else {
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          name: 'VPN Server',
-          region: CONFIG.REGION,
-          endpoints: ['/health', '/stats'],
-          documentation: 'VPN сервер для региона Oregon (US West)'
-        }));
-      }
+    this.server.listen(CONFIG.ADMIN_PORT, '0.0.0.0', () => {
+      logger.log(`🌐 Admin сервер запущен на порту ${CONFIG.ADMIN_PORT}`);
     });
+  }
 
-    server.listen(CONFIG.ADMIN_PORT, '0.0.0.0', () => {
-      logger.info(`Admin сервер запущен на порту ${CONFIG.ADMIN_PORT}`);
-    });
+  handleRequest(req, res) {
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET');
+    res.setHeader('Content-Type', 'application/json');
 
-    return server;
+    if (req.url === '/health') {
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        status: 'healthy',
+        region: CONFIG.REGION,
+        timestamp: new Date().toISOString()
+      }, null, 2));
+    } else if (req.url === '/stats') {
+      res.writeHead(200);
+      res.end(JSON.stringify(this.vpnServer.getStats(), null, 2));
+    } else {
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        service: 'Oregon VPN Server',
+        endpoints: {
+          health: '/health',
+          stats: '/stats',
+          vpn: `tcp://your-server.onrender.com:${CONFIG.VPN_PORT}`
+        },
+        documentation: 'Используйте VPN клиент с AES-256-CBC шифрованием'
+      }, null, 2));
+    }
   }
 }
 
-// Тестовый клиент для проверки сервера
+// Тестовый клиент (встроенный для проверки)
 class TestClient {
-  static async testConnection(port = CONFIG.VPN_PORT, host = '127.0.0.1') {
-    return new Promise((resolve, reject) => {
-      const socket = net.createConnection(port, host, () => {
-        logger.info(`Test client подключен к ${host}:${port}`);
+  static async test() {
+    return new Promise((resolve) => {
+      const socket = net.createConnection(CONFIG.VPN_PORT, '127.0.0.1', () => {
+        logger.log('🧪 Тестовый клиент подключен');
         
-        // Отправляем handshake
-        socket.write(HANDSHAKE_MAGIC);
-        
-        // Ожидаем ответ
-        socket.once('data', (data) => {
-          try {
-            const decrypted = SimpleEncryption.decrypt(data, SERVER_KEY);
-            
-            if (decrypted.equals(HANDSHAKE_RESPONSE)) {
-              logger.info('Handshake успешен!');
-              
-              // Отправляем тестовые данные
-              const testData = Buffer.from('Test message from client');
-              const encryptedTest = SimpleEncryption.encrypt(testData, CLIENT_KEY);
-              socket.write(encryptedTest);
-              
-              // Ожидаем ответ
-              socket.once('data', (responseData) => {
-                try {
-                  const decryptedResponse = SimpleEncryption.decrypt(responseData, SERVER_KEY);
-                  logger.info(`Получен ответ: ${decryptedResponse.toString()}`);
-                  socket.end();
-                  resolve(true);
-                } catch (error) {
-                  socket.destroy();
-                  reject(new Error(`Ошибка дешифрования ответа: ${error.message}`));
-                }
-              });
-            } else {
-              socket.destroy();
-              reject(new Error('Invalid handshake response'));
-            }
-          } catch (error) {
-            socket.destroy();
-            reject(new Error(`Ошибка handshake: ${error.message}`));
+        // Получаем приветственное сообщение
+        socket.once('data', (welcomeData) => {
+          const welcome = SimpleCipher.decrypt(welcomeData);
+          if (welcome) {
+            logger.log(`📨 Сервер: ${welcome.toString().trim()}`);
           }
+          
+          // Отправляем тестовое сообщение
+          const testMsg = Buffer.from('Hello Oregon VPN!');
+          const encrypted = SimpleCipher.encrypt(testMsg);
+          socket.write(encrypted);
+          
+          // Получаем ответ
+          socket.once('data', (responseData) => {
+            const response = SimpleCipher.decrypt(responseData);
+            if (response) {
+              logger.log(`📨 Ответ сервера: ${response.toString().trim()}`);
+            }
+            
+            // Закрываем соединение
+            socket.end();
+            logger.log('🧪 Тест завершен успешно');
+            resolve(true);
+          });
         });
       });
       
       socket.on('error', (err) => {
-        reject(new Error(`Socket error: ${err.message}`));
-      });
-      
-      socket.setTimeout(5000, () => {
-        socket.destroy();
-        reject(new Error('Connection timeout'));
+        logger.error(`Тестовый клиент ошибка: ${err.message}`);
+        resolve(false);
       });
     });
   }
 }
 
-// Основная функция запуска
-async function startServer() {
-  logger.info(`Запуск VPN сервера в регионе: ${CONFIG.REGION}`);
-  logger.info(`Протокол: ${CONFIG.VPN_PROTOCOL}`);
-  logger.info(`Порт VPN: ${CONFIG.VPN_PORT}`);
-  logger.info(`Порт админки: ${CONFIG.ADMIN_PORT}`);
+// Главная функция
+async function main() {
+  logger.log('🚀 Запуск VPN сервера для Render (Oregon)...');
   
   // Запуск VPN сервера
-  const vpnServer = new VPNServerTCP();
+  const vpnServer = new VPNServer();
   vpnServer.start();
   
   // Запуск админ сервера
-  const adminServer = new AdminServer();
+  const adminServer = new AdminServer(vpnServer);
   adminServer.start();
   
-  // Если запущено локально, тестируем соединение
-  if (process.env.NODE_ENV !== 'production' && CONFIG.VPN_PORT === '1194') {
+  // Авто-тест при локальном запуске
+  if (process.env.NODE_ENV !== 'production') {
     setTimeout(async () => {
-      try {
-        logger.info('Запуск тестового клиента...');
-        await TestClient.testConnection();
-        logger.info('Тест соединения успешен!');
-      } catch (error) {
-        logger.error(`Тест соединения не удался: ${error.message}`);
+      logger.log('🧪 Запуск автоматического теста...');
+      const success = await TestClient.test();
+      if (success) {
+        logger.log('✅ Сервер работает корректно!');
+      } else {
+        logger.log('⚠️ Тест не удался, но сервер запущен');
       }
     }, 1000);
   }
   
   // Graceful shutdown
-  const gracefulShutdown = () => {
-    logger.info('Завершение работы сервера...');
+  process.on('SIGTERM', () => {
+    logger.log('🛑 Получен SIGTERM, завершение работы...');
     process.exit(0);
-  };
+  });
   
-  process.on('SIGTERM', gracefulShutdown);
-  process.on('SIGINT', gracefulShutdown);
+  process.on('SIGINT', () => {
+    logger.log('🛑 Получен SIGINT, завершение работы...');
+    process.exit(0);
+  });
 }
 
-// Запуск сервера
+// Запуск
 if (require.main === module) {
-  startServer().catch(error => {
-    logger.error('Ошибка запуска сервера:', error);
+  main().catch(err => {
+    logger.error(`Ошибка запуска: ${err.message}`);
     process.exit(1);
   });
 }
 
-module.exports = {
-  startServer,
-  TestClient,
-  SimpleEncryption,
-  CONFIG
-};
+module.exports = { VPNServer, TestClient, CONFIG };
