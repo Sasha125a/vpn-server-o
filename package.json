@@ -1,0 +1,13 @@
+{
+  "name": "vpn-server-oregon",
+  "version": "1.0.0",
+  "description": "VPN сервер для Render в регионе Oregon",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
