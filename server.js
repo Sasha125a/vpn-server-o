@@ -1,11 +1,9 @@
 // server.js - Гибридный сервер для Render (обрабатывает HTTP и VPN)
 const net = require('net');
-const crypto = require('crypto');
 
 // Конфигурация
 const CONFIG = {
   PORT: parseInt(process.env.PORT) || 3000,
-  SECRET_KEY: process.env.VPN_SECRET || 'render-vpn-secret-2024',
   REGION: 'Oregon (US West)',
   HOSTNAME: process.env.RENDER_EXTERNAL_HOSTNAME || 'vpn-server-o.onrender.com'
 };
@@ -275,7 +273,7 @@ class VPNServer {
         socket.write(`Uptime: ${hours}h ${minutes}m ${seconds}s\n`);
         socket.write(`Active VPN clients: ${Array.from(this.clients.values()).filter(c => c.isVpn).length}\n`);
         socket.write(`Your IP: ${clientId.split(':')[0]}\n`);
-        socket.write(`Node.js: ${process.version}\n\n');
+        socket.write(`Node.js: ${process.version}\n\n`);
         break;
         
       case 'EXIT':
