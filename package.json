@@ -1,21 +1,16 @@
 {
-  "name": "vpn-server-oregon",
+  "name": "vpn-oregon-render",
   "version": "1.0.0",
-  "description": "VPN сервер для Render в Oregon с клиентом для терминала",
+  "description": "VPN Server for Render Oregon",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "client": "node server.js --client vpn-server-o.onrender.com 3000",
-    "dev": "node server.js",
-    "test": "echo \"Запустите: npm run client\""
+    "client": "node client.js"
   },
-  "keywords": ["vpn", "render", "oregon", "server"],
+  "keywords": ["vpn", "render", "oregon"],
   "author": "",
   "license": "MIT",
   "engines": {
     "node": ">=14.0.0"
-  },
-  "bin": {
-    "vpn-connect": "./client.js"
   }
 }
