@@ -1,19 +1,17 @@
 {
-  "name": "vpn-server-render",
-  "version": "2.0.0",
-  "description": "VPN Server for Render with proper PORT handling",
+  "name": "vpn-ws-server",
+  "version": "1.0.0",
+  "description": "WebSocket VPN Server for Render",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "client": "node client.js",
     "dev": "nodemon server.js"
   },
-  "keywords": [
-    "vpn",
-    "render",
-    "oregon",
-    "server"
-  ],
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "keywords": ["vpn", "websocket", "render", "oregon"],
   "author": "",
   "license": "MIT",
   "engines": {
