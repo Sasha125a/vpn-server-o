@@ -1,9 +1,9 @@
-// client.js - VPN клиент для терминала
+// client.js - VPN клиент для Render сервера
 const net = require('net');
 const readline = require('readline');
 
 class VPNClient {
-  constructor(host, port) {
+  constructor(host = 'vpn-server-o.onrender.com', port = 10000) {
     this.host = host;
     this.port = port;
     this.socket = null;
@@ -12,53 +12,68 @@ class VPNClient {
 
   async connect() {
     return new Promise((resolve, reject) => {
+      console.clear();
+      console.log('╔════════════════════════════════════════╗');
+      console.log('║       🚀 VPN CLIENT FOR RENDER        ║');
+      console.log('╚════════════════════════════════════════╝\n');
+      
       console.log(`🔗 Подключение к ${this.host}:${this.port}...`);
+      console.log('⏳ Пожалуйста, подождите...\n');
       
       this.socket = net.createConnection({
         host: this.host,
         port: this.port,
-        timeout: 30000 // Увеличиваем таймаут
+        timeout: 15000
       }, () => {
-        console.log('✅ Успешно подключено!');
+        console.log('✅ Успешно подключено к VPN серверу!');
+        console.log('📍 Регион: Oregon (US West)');
+        console.log('\n════════════════════════════════════════');
         this.connected = true;
         resolve();
       });
       
+      // Обработка данных от сервера
       this.socket.on('data', (data) => {
         process.stdout.write(data.toString());
       });
       
       this.socket.on('error', (err) => {
         if (!this.connected) {
-          console.error(`❌ Ошибка подключения: ${err.message}`);
-          console.log('\n🔧 Возможные решения:');
-          console.log('1. Проверьте, что сервер запущен на Render');
-          console.log('2. Убедитесь в правильности адреса:');
-          console.log(`   Ваш сервер должен быть: ваш-проект.onrender.com`);
-          console.log('3. Попробуйте создать свой сервер:');
-          console.log('   - Зайдите на render.com');
-          console.log('   - Создайте Web Service');
-          console.log('   - Выберите регион Oregon');
-          console.log('   - Загрузите этот код\n');
+          console.error(`\n❌ Ошибка подключения: ${err.message}`);
+          
+          if (err.code === 'ECONNREFUSED') {
+            console.log('\n🔧 Возможные причины:');
+            console.log('1. Сервер не запущен или перезагружается');
+            console.log('2. Неправильный порт');
+            console.log('3. Render завершил инстанс (бесплатный план)');
+            console.log('\n💡 Решения:');
+            console.log('• Откройте в браузере: https://' + this.host);
+            console.log('• Подождите 30-60 секунд для запуска сервера');
+            console.log('• Проверьте логи на Render Dashboard');
+          } else if (err.code === 'ETIMEDOUT') {
+            console.log('\n⏰ Таймаут подключения');
+            console.log('• Проверьте интернет соединение');
+            console.log('• Возможно, сервер выключен');
+          }
+          
           reject(err);
         }
       });
       
       this.socket.on('close', () => {
         if (this.connected) {
-          console.log('\n🔌 Соединение закрыто');
+          console.log('\n🔌 Соединение закрыто сервером');
           process.exit(0);
         }
       });
       
       this.socket.on('timeout', () => {
-        console.error('⏰ Таймаут соединения');
-        console.log('ℹ️  Сервер не отвечает. Возможно:');
-        console.log('   - Сервер не запущен на Render');
-        console.log('   - Неправильное имя сервера');
-        console.log('   - Render завершил бесплатный инстанс');
+        console.error('\n⏰ Таймаут соединения');
+        console.log('Попробуйте:');
+        console.log('1. Проверить что сервер запущен: https://' + this.host);
+        console.log('2. Подождать 1-2 минуты (бесплатный инстанс просыпается)');
         this.socket.destroy();
-        reject(new Error('Timeout'));
+        reject(new Error('Connection timeout'));
       });
     });
   }
@@ -66,11 +81,11 @@ class VPNClient {
   startInteractive() {
     const rl = readline.createInterface({
       input: process.stdin,
-      output: process.stdout,
-      prompt: 'VPN> '
+      output: process.stdout
     });
     
-    rl.prompt();
+    // Простой промпт
+    process.stdout.write('\nVPN> ');
     
     rl.on('line', (line) => {
       if (this.connected) {
@@ -78,90 +93,98 @@ class VPNClient {
         
         if (line.trim().toUpperCase() === 'EXIT') {
           setTimeout(() => {
+            console.log('\n👋 Завершение работы...');
             this.socket.end();
             rl.close();
-          }, 1000);
+            process.exit(0);
+          }, 500);
+        } else {
+          // Показываем промпт снова через небольшой таймаут
+          setTimeout(() => process.stdout.write('VPN> '), 100);
         }
       }
-      rl.prompt();
     });
     
     rl.on('close', () => {
-      console.log('👋 До свидания!');
+      console.log('\n👋 До свидания!');
       if (this.socket) this.socket.end();
       process.exit(0);
     });
   }
 }
 
-// Если запущен напрямую
+// Если запущен как скрипт
 if (require.main === module) {
   const args = process.argv.slice(2);
   
   if (args.length === 0) {
     console.log(`
-    🔧 VPN Client for Render
+╔══════════════════════════════════════════════════════════╗
+║                 🚀 VPN CLIENT FOR RENDER                 ║
+╚══════════════════════════════════════════════════════════╝
+
+📋 Использование:
+  node client.js [сервер] [порт]
+
+📝 Примеры:
+  node client.js vpn-server-o.onrender.com 10000
+  node client.js your-server.onrender.com 3000
+
+🛠️  Если сервер не отвечает:
+  1. Откройте в браузере: https://ваш-сервер.onrender.com
+  2. Подождите 30-60 секунд для запуска
+  3. Проверьте логи на render.com
+
+🔧 Команды в VPN:
+  HELP    - Показать команды
+  PING    - Проверить соединение
+  TIME    - Время сервера
+  STATS   - Статистика
+  ECHO текст - Эхо
+  EXIT    - Выход
+`);
     
-    Использование:
-      node client.js <ваш-сервер>.onrender.com <порт>
+    // Авто-определение сервера
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
     
-    Пример:
-      node client.js vpn-oregon.onrender.com 3000
-    
-    Если у вас нет сервера:
-    1. Создайте аккаунт на render.com
-    2. Создайте Web Service с этим кодом
-    3. Выберите регион Oregon (US West)
-    4. Получите ваш адрес: ваш-проект.onrender.com
-    5. Запустите клиент с вашим адресом
-    
-    Команды в VPN:
-      PING    - Проверить соединение
-      STATS   - Статистика сервера
-      EXIT    - Выйти
-      любой текст - Отправить эхо
-    `);
-    process.exit(1);
+    rl.question('\nВведите адрес вашего сервера (например: vpn-server-o.onrender.com): ', (host) => {
+      rl.question('Введите порт (по умолчанию 10000): ', (port) => {
+        rl.close();
+        
+        const finalHost = host.trim() || 'vpn-server-o.onrender.com';
+        const finalPort = parseInt(port) || 10000;
+        
+        startClient(finalHost, finalPort);
+      });
+    });
+  } else {
+    const host = args[0];
+    const port = parseInt(args[1]) || 10000;
+    startClient(host, port);
   }
-  
-  const host = args[0];
-  const port = parseInt(args[1]) || 3000;
-  
+}
+
+async function startClient(host, port) {
   const client = new VPNClient(host, port);
   
-  client.connect()
-    .then(() => {
-      console.log('\n📡 VPN подключен! Доступные команды:');
-      console.log('  PING    - Проверить соединение');
-      console.log('  STATS   - Статистика сервера');
-      console.log('  EXIT    - Выйти');
-      console.log('  Любой текст - Отправить сообщение\n');
-      client.startInteractive();
-    })
-    .catch(() => {
-      console.log('\n🎯 Попробуйте создать свой сервер:');
-      console.log('1. Скопируйте этот код в папку:');
-      console.log('   server.js');
-      console.log('   package.json');
-      console.log('   client.js');
-      console.log('\n2. Создайте package.json:');
-      console.log(`   {
-  "name": "vpn-oregon",
-  "version": "1.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=14.0.0"
+  try {
+    await client.connect();
+    client.startInteractive();
+  } catch (error) {
+    console.log('\n🎯 Не удалось подключиться к серверу.');
+    console.log('💡 Создайте свой сервер на Render:');
+    console.log('1. Зайдите на render.com');
+    console.log('2. Создайте Web Service');
+    console.log('3. Выберите регион Oregon');
+    console.log('4. Загрузите файлы сервера');
+    console.log('5. Используйте ваш адрес: ваш-проект.onrender.com\n');
+    
+    process.exit(1);
   }
-}`);
-      console.log('\n3. Загрузите на GitHub');
-      console.log('4. Создайте Web Service на render.com');
-      console.log('5. Выберите регион Oregon');
-      console.log('6. Получите ваш адрес: ваш-проект.onrender.com');
-      console.log('7. Запустите: node client.js ваш-проект.onrender.com\n');
-    });
 }
 
 module.exports = VPNClient;
