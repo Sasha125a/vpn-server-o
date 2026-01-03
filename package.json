@@ -1,12 +1,16 @@
 {
   "name": "vpn-server-oregon",
   "version": "1.0.0",
-  "description": "VPN сервер для Render в регионе Oregon",
+  "description": "VPN сервер для региона Oregon (US West)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node client-test.js",
+    "dev": "nodemon server.js"
   },
-  "dependencies": {},
+  "keywords": ["vpn", "oregon", "render"],
+  "author": "",
+  "license": "MIT",
   "engines": {
     "node": ">=14.0.0"
   }
