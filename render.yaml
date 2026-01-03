@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: vpn-server-oregon
+    env: node
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: VPN_PROTOCOL
+        value: tcp
+      - key: VPN_PORT
+        value: 1194
+      - key: ADMIN_PORT
+        value: 3001
+      - key: PORT
+        value: 3000
+      - key: LOG_LEVEL
+        value: info
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /health
+    autoDeploy: true
